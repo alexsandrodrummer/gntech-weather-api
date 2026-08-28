@@ -1,5 +1,11 @@
 from django.shortcuts import get_object_or_404
-from rest_framework import status
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiResponse,
+    extend_schema,
+    inline_serializer,
+)
+from rest_framework import serializers, status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -18,9 +24,50 @@ from weather.services.openweather import (
 from weather.services.weather_service import collect_weather
 
 
+ErrorResponseSerializer = inline_serializer(
+    name="ErrorResponse",
+    fields={"detail": serializers.CharField()},
+)
+
+
 class WeatherCollectionView(APIView):
     """Collect and persist current weather data for a city."""
 
+    @extend_schema(
+        summary="Collect current weather",
+        description=(
+            "Collects current weather data for the requested city and stores "
+            "the resulting record."
+        ),
+        request=WeatherCollectionSerializer,
+        responses={
+            201: WeatherRecordSerializer,
+            400: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="Invalid request or empty city.",
+            ),
+            404: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="City not found.",
+            ),
+            502: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="Invalid response from the external weather service.",
+            ),
+            503: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="External weather service unavailable.",
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                "City request",
+                value={"city": "Campinas"},
+                request_only=True,
+            )
+        ],
+        tags=["Weather"],
+    )
     def post(self, request: Request) -> Response:
         input_serializer = WeatherCollectionSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
@@ -58,6 +105,12 @@ class WeatherCollectionView(APIView):
 class WeatherRecordListView(APIView):
     """List all stored weather records."""
 
+    @extend_schema(
+        summary="List weather records",
+        description="Returns all stored weather records in model-defined order.",
+        responses={200: WeatherRecordSerializer(many=True)},
+        tags=["Weather"],
+    )
     def get(self, request: Request) -> Response:
         weather_records = WeatherRecord.objects.all()
         serializer = WeatherRecordSerializer(weather_records, many=True)
@@ -67,6 +120,18 @@ class WeatherRecordListView(APIView):
 class WeatherRecordDetailView(APIView):
     """Retrieve one stored weather record."""
 
+    @extend_schema(
+        summary="Retrieve a weather record",
+        description="Returns a stored weather record by its ID.",
+        responses={
+            200: WeatherRecordSerializer,
+            404: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="Weather record not found.",
+            ),
+        },
+        tags=["Weather"],
+    )
     def get(self, request: Request, pk: int) -> Response:
         weather_record = get_object_or_404(WeatherRecord, pk=pk)
         serializer = WeatherRecordSerializer(weather_record)
